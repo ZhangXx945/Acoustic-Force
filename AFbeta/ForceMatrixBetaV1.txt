@@ -1,0 +1,80 @@
+δh=0.0005;
+dimension2=2;
+function forceMat(Rs,parPos)
+kMat=Matrix{Float64}(undef,pNo*dimension2,pNo*dimension2);
+for iTmp in 1:pNo
+	for jTmp in 1:dimension2
+		parPos[iTmp,jTmp]=parPos[iTmp,jTmp]+2*δh;
+		f1=round.(forcePackLow(Rs,parPos);digits=rndDigNo);
+		parPos[iTmp,jTmp]=parPos[iTmp,jTmp]-2*δh;
+		parPos[iTmp,jTmp]=parPos[iTmp,jTmp]+δh;
+		f2=round.(forcePackLow(Rs,parPos);digits=rndDigNo);
+		parPos[iTmp,jTmp]=parPos[iTmp,jTmp]-δh;
+		parPos[iTmp,jTmp]=parPos[iTmp,jTmp]-2*δh;
+		f3=round.(forcePackLow(Rs,parPos);digits=rndDigNo);
+		parPos[iTmp,jTmp]=parPos[iTmp,jTmp]+2*δh;
+		parPos[iTmp,jTmp]=parPos[iTmp,jTmp]-δh;
+		f4=round.(forcePackLow(Rs,parPos);digits=rndDigNo);
+		parPos[iTmp,jTmp]=parPos[iTmp,jTmp]+δh;
+		kk1=(-f1.+8*f2.-8*f4.+f3)/12/δh;
+		if dimension2==dimension
+			kk2=copy(kk1);
+		else
+			kk2=Array{Float64}(undef,pNo*dimension2);
+			countTmp=1;
+			for kTmp in 1:pNo*dimension
+				if kTmp%3==0
+					continue
+				else
+					kk2[countTmp]=kk1[kTmp];
+					countTmp+=1;
+				end
+			end
+		end		
+		kMat[:,(iTmp-1)*dimension2+jTmp]=kk2;
+	end
+	println("particle "*string(iTmp)*" done")
+end
+return kMat
+end
+
+function sweepRs(parPos,Rs)
+dRs=0.0004;
+outputData=open("5P1InCenterOutData2.txt","w");
+for iTmp in 1:5
+	write(outputData,"round"*string(iTmp));
+	println("round"*string(iTmp));
+	write(outputData,"\n");
+	write(outputData,"Rs: "*string(Rs));
+	write(outputData,"\n");
+	write(outputData,"initial positions: ");
+	write(outputData,"\n");
+	writedlm(outputData,parPos,'\t');
+	write(outputData,"\n");
+	parPos=md(Rs,parPos,minStep,maxStep);
+	write(outputData,"equilibrium positions: ");
+	write(outputData,"\n");
+	writedlm(outputData,parPos,'\t');
+	write(outputData,"\n");
+	kMat=forceMat(Rs,parPos);
+	write(outputData,"force matrix: ");
+	write(outputData,"\n");
+	writedlm(outputData,kMat,'\t');
+	println(kMat);
+	write(outputData,"\n");
+	egv=eigen(kMat);
+	write(outputData,"eigenvalues: ");
+	write(outputData,"\n");
+	writedlm(outputData,round.(egv.values,digits=rndDigNo),'\t');
+	println(round.(egv.values,digits=rndDigNo));
+	write(outputData,"\n");
+	write(outputData,"eigenvectors: ");
+	write(outputData,"\n");
+	writedlm(outputData,round.(egv.vectors,digits=rndDigNo),'\t');
+	write(outputData,"\n");
+	write(outputData,"\n");
+	Rs=Rs+dRs;
+end
+close(outputData);
+return 0;
+end

@@ -1,0 +1,223 @@
+#display setting
+#export DISPLAY=$(cat /etc/resolv.conf | grep nameserver | awk '{print $2}'):0
+./julia
+using MultipleScattering
+using GSL
+using LinearAlgebra
+using Plots;pyplot()
+using DelimitedFiles
+##############################################################################################
+#########################define basic parameters of system###########################################
+
+dimension=3;	#model dimension
+pNo=5;	#number of particles
+coefOrder=6;	#order of expansion coefficients
+ω = 251327.412287;	#angular frequency of incident wave
+incAmp = 3000.0;	#amplitude of incident beam
+incDir = [0.0, 0.0, 1.0];	#set incident direction
+ρ_b=1.225;	#background medium density
+c_b=343.0;	#background medium soundspeed
+ρ_p=29.0;		#particle density
+c_p=900.0;	#particle soundspeed
+k=ω/c_b;		#wave number
+incPos = [0.0, 0.0, -0.3];	#original position of incident wave
+h=0.00005;	#step to calculate velocity field from pressure field by using 5 points stencil
+#Rs=0.0045;	#particle radius
+#R=Rs+0.00000001;	#radius of integral surface
+#n1=20; 		#sample number in θ coordinate
+#n2=40; 		#sample number in ϕ coordinate
+parPos=Matrix{Float64}(undef,pNo,dimension);	#to store particles initial positons, format is
+####x1 y1 z1####
+####x2 y2 z2####
+####x3 y3 z3####
+###########################################################################################
+#######################input particles initial positons##############################################
+parPos[1,:]=[0.0186314 0.0 0.0];#first particle initial position
+parPos[2,:]=[0.0 0.0186314 0.0];
+parPos[3,:]=[-0.0186314 0.0 0.0];
+parPos[4,:]=[0.0 -0.0186314 0.0];
+parPos[5,:]=[0.0 0.0 0.0];
+#parPos[6,:]=[0.03*cos(2.0*π/9*4),0.03*sin(2.0*π/9*4),0.0];
+#parPos[7,:]=[0.03*cos(2.0*π/9*5),0.03*sin(2.0*π/9*5),0.0];
+#parPos[8,:]=[0.03*cos(2.0*π/9*6),0.03*sin(2.0*π/9*6),0.0];
+#parPos[9,:]=[0.03*cos(2.0*π/9*7),0.03*sin(2.0*π/9*7),0.0];
+#parPos[10,:]=[0.03*cos(2.0*π/9*8),0.03*sin(2.0*π/9*8),0.0];
+###########################################################################################
+####################passing parameters to julia multipleScattering package#############################
+bgMedium = Acoustic(dimension; ρ = ρ_b, c = c_b);	#build background acoustic model
+plane_wave = plane_source(bgMedium; amplitude = incAmp, direction = incDir, position = incPos)+plane_source(bgMedium; amplitude = -incAmp, direction = -incDir, position = -incPos);	#build incident wave
+parMedium = Acoustic(dimension; ρ = ρ_p, c = c_p);	#build the acoustic model in particles
+############################################################################################
+#######################define special functions###################################################
+hk(n,x)=sf_bessel_jl(n,x)+im*sf_bessel_yl(n,x);	#Hankel function
+function ymn(n,m,θ,ϕ) 	#spherical harmonics
+if m>=0
+return sf_legendre_sphPlm(n,m,cos(θ))*exp(im*m*ϕ);
+elseif isodd(-m)
+return -sf_legendre_sphPlm(n,-m,cos(θ))*exp(im*m*ϕ);
+else
+return sf_legendre_sphPlm(n,-m,cos(θ))*exp(im*m*ϕ);
+end
+end
+############################################################################################
+################get expansion coefficients########################################################
+function getCoefProto(Rs,pNoTmp,parPosTmp,waveTmp,coefOrderTmp)
+particles=Array{Particle{dimension, Acoustic{Float64, dimension}, Sphere{Float64, dimension}}}(undef, 0);	#define a null array to store particles model
+for iTmp in 1:pNoTmp	#set each particle property
+parShape=Sphere(parPosTmp[iTmp,:],Rs);
+particles=push!(particles,Particle(parMedium,parShape));
+end
+simModel=FrequencySimulation(particles,waveTmp);#simulation model
+coefDataTmp=basis_coefficients(simModel,ω,basis_order=coefOrderTmp);#to store the expansion coefficients
+return coefDataTmp
+end
+#######################define function to calculate pressure field#######################################
+function pProto(x,y,z,pNoTmp,parPosTmp,waveTmp,coefDataTmp,coefOrderTmp)
+fieldDataTmp=0.0+0.0*im;
+r=Array{Float64}(undef,pNo);
+θ=Array{Float64}(undef,pNo);
+ϕ=Array{Float64}(undef,pNo);
+for iTmp in 1:pNoTmp
+parPosTmp2=parPosTmp[iTmp,:];
+xx=x-parPosTmp2[1];
+yy=y-parPosTmp2[2];
+zz=z-parPosTmp2[3];
+r[iTmp]=sqrt(xx*xx+yy*yy+zz*zz);
+θ[iTmp]=acos(zz/max(r[iTmp],0.000000001));
+if yy==0&&xx>0
+ϕ[iTmp]=0.0;
+elseif yy==0&&xx<0
+ϕ[iTmp]=π;
+else
+ϕ[iTmp]=(1-sign(yy))*π+sign(yy)*acos(xx/max(sqrt(xx*xx+yy*yy),0.00000001));
+end
+for nTmp in 0:coefOrderTmp
+for mTmp in -nTmp:nTmp
+fieldDataTmp+=coefDataTmp[nTmp*nTmp+nTmp+mTmp+1,iTmp]*hk(nTmp,k*r[iTmp])*ymn(nTmp,mTmp,θ[iTmp],ϕ[iTmp]);
+end
+end
+end
+return fieldDataTmp+waveTmp.field([x,y,z],ω);
+end
+#############################################################################################
+p(x,y,z,coefDataTmp,coefOrderTmp)=pProto(x+0.0,y+0.0,z+0.0,pNo,parPos,plane_wave,coefDataTmp,coefOrderTmp);
+#############################################################################################
+###################Calculate velocity field by using five-point stencil####################################
+function v(x,y,z,coefDataTmp,coefOrderTmp)
+vDataTmp=Array{ComplexF64}(undef,dimension);
+pX2=p(x+2*h,y,z,coefDataTmp,coefOrderTmp);
+pX1=p(x+h,y,z,coefDataTmp,coefOrderTmp);
+pXN2=p(x-2*h,y,z,coefDataTmp,coefOrderTmp);	#N denotes negative
+pXN1=p(x-h,y,z,coefDataTmp,coefOrderTmp);
+pY2=p(x,y+2*h,z,coefDataTmp,coefOrderTmp);
+pY1=p(x,y+h,z,coefDataTmp,coefOrderTmp);
+pYN2=p(x,y-2*h,z,coefDataTmp,coefOrderTmp);
+pYN1=p(x,y-h,z,coefDataTmp,coefOrderTmp);
+pZ2=p(x,y,z+2*h,coefDataTmp,coefOrderTmp);
+pZ1=p(x,y,z+h,coefDataTmp,coefOrderTmp);
+pZN2=p(x,y,z-2*h,coefDataTmp,coefOrderTmp);
+pZN1=p(x,y,z-h,coefDataTmp,coefOrderTmp);
+vDataTmp[1]=-im/ρ_b/ω*(-pX2+8*pX1-8*pXN1+pXN2)/12/h; 
+vDataTmp[2]=-im/ρ_b/ω*(-pY2+8*pY1-8*pYN1+pYN2)/12/h; 
+vDataTmp[3]=-im/ρ_b/ω*(-pZ2+8*pZ1-8*pZN1+pZN2)/12/h; 
+return vDataTmp
+end
+###########################################################################################
+###########################calculate time average of stress tensor###################################
+function T(x,y,z,coefDataTmp,coefOrderTmp)
+TDataTmp=Matrix{Float64}(undef,dimension,dimension);	#matrix to store stress tensor in the form
+##############################
+######### Txx Txy Txz ########
+######### Tyx Tyy Tyz ########
+######### Tzx Tzy Tzz ########
+##############################
+vTmp=v(x,y,z,coefDataTmp,coefOrderTmp)
+vxTmp=vTmp[1];
+vyTmp=vTmp[2];
+vzTmp=vTmp[3];
+cjvxTmp=conj(vxTmp);
+cjvyTmp=conj(vyTmp);
+cjvzTmp=conj(vzTmp);
+pTmp=p(x,y,z,coefDataTmp,coefOrderTmp);
+cjpTmp=conj(pTmp);
+vSqu=real(vxTmp*cjvxTmp+vyTmp*cjvyTmp+vzTmp*cjvzTmp);
+pSquCoeff=real(pTmp*cjpTmp/2/ρ_b/c_b/c_b);
+TDataTmp[1,1]=0.5*(ρ_b*(real(vxTmp*cjvxTmp)-0.5*vSqu)+pSquCoeff);
+TDataTmp[1,2]=0.5*ρ_b*real(vxTmp*cjvyTmp);
+TDataTmp[1,3]=0.5*ρ_b*real(vxTmp*cjvzTmp);
+TDataTmp[2,1]=0.5*ρ_b*real(vyTmp*cjvxTmp);
+TDataTmp[2,2]=0.5*(ρ_b*(real(vyTmp*cjvyTmp)-0.5*vSqu)+pSquCoeff);
+TDataTmp[2,3]=0.5*ρ_b*real(vyTmp*cjvzTmp);
+TDataTmp[3,1]=0.5*ρ_b*real(vzTmp*cjvxTmp);
+TDataTmp[3,2]=0.5*ρ_b*real(vzTmp*cjvyTmp);
+TDataTmp[3,3]=0.5*(ρ_b*(real(vzTmp*cjvzTmp)-0.5*vSqu)+pSquCoeff);
+return TDataTmp
+end
+###########################################################################################
+##################################calculate force density########################################
+function fDens(Rs,θ,ϕ,x0,y0,z0,coefDataTmp,coefOrderTmp)	#x0,y0,z0 denote particle's position
+fDensDataTmp=Array{Float64}(undef,3);	#[fDensx,fDensy,fDensz]
+R=Rs+0.00000001;
+sθ=sin(θ);cθ=cos(θ);sϕ=sin(ϕ);cϕ=cos(ϕ);
+xTmp=x0+R*sθ*cϕ;
+yTmp=y0+R*sθ*sϕ;
+zTmp=z0+R*cθ;
+TData=T(xTmp,yTmp,zTmp,coefDataTmp,coefOrderTmp);
+fDensDataTmp[1]=(TData[1,1]*sθ*cϕ+TData[1,2]*sθ*sϕ+TData[1,3]*cθ)*R*R*sθ;
+fDensDataTmp[2]=(TData[2,1]*sθ*cϕ+TData[2,2]*sθ*sϕ+TData[2,3]*cθ)*R*R*sθ;
+fDensDataTmp[3]=(TData[3,1]*sθ*cϕ+TData[3,2]*sθ*sϕ+TData[3,3]*cθ)*R*R*sθ;
+return fDensDataTmp
+end
+###########################################################################################
+###########################numerical quadrature for acoustic force##################################
+function force(Rs,x0,y0,z0,n1,n2,coefDataTmp,coefOrderTmp)	#n1,n2 denote samples numbers in polar angle θ and azimuthal angle ϕ coordinate respectively,R denotes the radius of the integral surface
+fDataTmp=[0.0,0.0,0.0]############[fx,fy,fz]#######################
+xDataStoreTmp=zeros(n1,n2);
+yDataStoreTmp=zeros(n1,n2);
+zDataStoreTmp=zeros(n1,n2);
+step1=π/n1;
+step2=2*π/n2;
+for i in 1:n1
+θTmp=(i-1)*step1;
+for j in 1:n2
+ϕTmp=(j-1)*step2;
+fDensData=fDens(Rs,θTmp,ϕTmp,x0,y0,z0,coefDataTmp,coefOrderTmp);
+xDataStoreTmp[i,j]=fDensData[1];
+yDataStoreTmp[i,j]=fDensData[2];
+zDataStoreTmp[i,j]=fDensData[3];
+end
+end
+fDataTmp[1]=-sum(xDataStoreTmp)*step1*step2;
+fDataTmp[2]=-sum(yDataStoreTmp)*step1*step2;
+fDataTmp[3]=-sum(zDataStoreTmp)*step1*step2;
+return fDataTmp
+end
+############################################################################################
+#########################calculate all particles forces##############################################
+function allForce(Rs,pNoTmp,parPosTmp,n1,n2,coefDataTmp,coefOrderTmp)
+allForceTmp=Array{Float64}(undef,0)
+for iTmp in 1:pNoTmp
+forceTmp=force(Rs,parPosTmp[iTmp,1],parPosTmp[iTmp,2],parPosTmp[iTmp,3],n1,n2,coefDataTmp,coefOrderTmp);
+allForceTmp=push!(allForceTmp,forceTmp[1],forceTmp[2],forceTmp[3]);
+end
+return allForceTmp
+end
+###########################################################################################
+###########################pack function for low procision calculation ###############################
+function forcePackLow(Rs,parPosTmp)
+coefData=getCoefProto(Rs,pNo,parPosTmp,plane_wave,coefOrder);
+force=allForce(Rs,pNo,parPos,25,50,coefData,coefOrder);
+return force
+end
+#############################################################################
+function forcePackHigh(Rs,parPosTmp)
+coefData=getCoefProto(Rs,pNo,parPosTmp,plane_wave,10);
+force=allForce(Rs,pNo,parPos,35,70,coefData,10);
+return force
+end
+#############################################################################
+function forcePackMiddle(Rs,parPosTmp)
+coefData=getCoefProto(Rs,pNo,parPosTmp,plane_wave,8);
+force=allForce(Rs,pNo,parPos,30,60,coefData,8);
+return force
+end
