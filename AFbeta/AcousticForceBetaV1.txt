@@ -203,21 +203,21 @@ end
 return allForceTmp
 end
 ###########################################################################################
-###########################pack function for low procision calculation ###############################
+###########################pack function for low precision calculation ###############################
 function forcePackLow(Rs,parPosTmp)
 coefData=getCoefProto(Rs,pNo,parPosTmp,plane_wave,coefOrder);
-force=allForce(Rs,pNo,parPos,25,50,coefData,coefOrder);
+force=allForce(Rs,pNo,parPosTmp,25,50,coefData,coefOrder);
 return force
 end
 #############################################################################
 function forcePackHigh(Rs,parPosTmp)
 coefData=getCoefProto(Rs,pNo,parPosTmp,plane_wave,10);
-force=allForce(Rs,pNo,parPos,35,70,coefData,10);
+force=allForce(Rs,pNo,parPosTmp,35,70,coefData,10);
 return force
 end
 #############################################################################
 function forcePackMiddle(Rs,parPosTmp)
 coefData=getCoefProto(Rs,pNo,parPosTmp,plane_wave,8);
-force=allForce(Rs,pNo,parPos,30,60,coefData,8);
+force=allForce(Rs,pNo,parPosTmp,30,60,coefData,8);
 return force
 end
