@@ -1,0 +1,61 @@
+##############basic parameters#################
+stepsize for calculating velocity field δh(m)(0.00005):
+0.00005
+stepsize for calculating force matrix element δh2(m)(0.0001):
+0.0001
+distance between integral surface and particle surface δr(m)(0.00015):
+0.00015
+time interval in molecular dynamics δt(0.01):
+0.01
+order of expansion coefficients in molecular dynamics(6):
+6
+order of expansion coefficients in force matrix(10):
+10
+integral samples in θ component in MD(24):
+24
+integral samples in ϕ component in MD(48):
+48
+integral samples in θ component in force matrix(36):
+36
+integral samples in ϕ component in force matrix(48):
+72
+maximum step number in each round of molecular dynamics:
+200
+background medium density(kg/m^3):
+1.225
+background medium soundspeed(m/s):
+343
+incident wave frequency(Hz):
+40000
+#################plane wave setting####################
+wave number:
+2
+1-st wave amplitude(Pa):
+3000 
+1-st wave direction:
+0 0 1
+1-st wave position(m):
+0 0 -1
++++++++++++++++++++++++++++++++++++++++++++
+2-nd wave amplitude(Pa):
+-3000
+2-nd wave direction:
+0 0 -1
+2-nd wave position(m):
+0 0 1
+####################particle setting#######################
+particle number:
+2
+is_center:
+false
+ring number:
+1
+particle radius(m):
+0.005 0.005 1
+particle density(kg/m^3):
+29 29 1
+particle soundspeed(m/s):
+900 900 1
++++++++++++++++++++++++++++++++++++++++++++++++++
+1-st ring radius(m):
+0.01
